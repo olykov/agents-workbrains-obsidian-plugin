@@ -1,0 +1,9 @@
+{
+  "id": "agents-workbrain-kanban",
+  "name": "Agents Workbrain Kanban",
+  "version": "0.1.0",
+  "minAppVersion": "1.8.0",
+  "description": "Optional Obsidian board for an Agents Workbrain vault.",
+  "author": "Agents Workbrain contributors",
+  "isDesktopOnly": false
+}
