@@ -1,13 +1,13 @@
 {
   "name": "agents-workbrain-kanban",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Optional Obsidian kanban for an Agents Workbrain vault.",
   "main": "main.js",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "check": "npm run test && npm run build"
   },
   "keywords": [

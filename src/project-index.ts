@@ -8,27 +8,18 @@ function stringValue(value: unknown, fallback = ''): string {
 
 export function isProjectPath(path: string, projectsRoot: string): boolean {
   const root = projectsRoot.replace(/^\/+|\/+$/g, '');
-  if (!path.startsWith(`${root}/`)) return false;
-  const relative = path.slice(root.length + 1);
-  const parts = relative.split('/');
-  return parts.length === 2 && Boolean(parts[0]) && parts[1] === 'project.md';
+  const parts = path.split('/');
+  return parts.length === 3 && parts[2] === 'project.md' && (parts[0] === root || parts[0] === 'archive');
 }
 
 export function readProject(app: App, file: TFile, projectsRoot: string): ProjectRecord | null {
   if (!isProjectPath(file.path, projectsRoot)) return null;
   const frontmatter = app.metadataCache.getFileCache(file)?.frontmatter;
   if (!frontmatter) return null;
-  const id = stringValue(frontmatter.project_id);
+  const id = stringValue(frontmatter.slug);
   const name = stringValue(frontmatter.name);
-  const status = stringValue(frontmatter.status);
-  if (
-    frontmatter.schema_version !== 1 ||
-    frontmatter.vault !== 'workbrain' ||
-    !id ||
-    !name ||
-    !['active', 'paused', 'archived'].includes(status)
-  ) return null;
-  return { path: file.path, id, name, status };
+  if (!id || !name) return null;
+  return { path: file.path, id, name, status: file.path.startsWith('archive/') ? 'archived' : stringValue(frontmatter.status, 'active') };
 }
 
 export function loadProjects(app: App, projectsRoot: string): ProjectRecord[] {

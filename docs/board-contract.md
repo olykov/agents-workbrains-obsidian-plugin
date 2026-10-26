@@ -1,18 +1,14 @@
-# Board contract — v1
+# Board contract — v2
 
-Agents Workbrain Kanban consumes the schema distributed by Agents Workbrain:
+The board reads the layout defined by Agents Workbrain v2:
 
-- Exact project path: `02_projects/<slug>/project.md`.
-- Exact task path: `02_tasks/<slug>/task.md`.
-- Status order: `backlog`, `todo`, `in_progress`, `review`, `blocked`, `done`, `cancelled`.
-- Terminal tasks (`done`, `cancelled`) are hidden by default.
-- Archived project manifests are omitted from the selector unless explicitly shown.
-- Search covers id, title, priority, type, parent, projects, assignee, reporter, and labels.
-- Swimlanes: project, parent, priority, or none. A many-to-many task appears in every matching
-  project lane. Cards sort by priority and then id.
-- A task can move to `done` only when `completion_evidence` is non-empty.
-- Status mutations update `updated`, set `start_date` on first move to `in_progress`, set
-  `finish_date` on move to `done`, and append a dated comment.
+- Projects: `02_work/<project>/project.md` and `archive/<project>/project.md`.
+- Tasks: `02_work/<project>/tasks/<task>/task.md`, `archive/<project>/<task>/task.md`, and `archive/<project>/tasks/<task>/task.md` for whole-project archives.
+- Task metadata uses scalar `project:` and `parent:`. Membership follows the physical project folder.
+- Status order: `backlog`, `todo`, `in_progress`, `review`, `Blocked`, `Closed`, `Cancelled`.
+- Archived tasks are excluded from the default view and open-task counts, regardless of their status. An archived whole project retains original statuses.
+- Terminal status actions move the entire task folder to `archive/<project>/<task>/`. `Blocked` remains active. A failed archive move restores the original content and path.
+- `Closed` requires a commit or completion evidence for a task without a code workspace; `Blocked` and `Cancelled` require a reason.
+- Every status mutation updates timestamps and appends a dated comment. `sources/`, `meetings/`, `notes/`, and `results/` are optional task-local folders.
 
-The task and project JSON schemas in Agents Workbrain are normative. Any schema change requires a
-matching plugin and test update.
+The task and project schemas in Agents Workbrain are normative. Change both packages and their tests together when the contract changes.

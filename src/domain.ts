@@ -3,28 +3,13 @@ export const CANONICAL_STATUSES = [
   'todo',
   'in_progress',
   'review',
-  'blocked',
-  'done',
-  'cancelled',
+  'Blocked',
+  'Closed',
+  'Cancelled',
 ] as const;
-
-export const CANONICAL_TYPES = [
-  'research',
-  'discovery',
-  'feature',
-  'bug-fix',
-  'refactor',
-  'chore',
-  'incident',
-  'documentation',
-] as const;
-
-export const CANONICAL_PRIORITIES = ['critical', 'high', 'medium', 'low'] as const;
 
 export type TaskStatus = (typeof CANONICAL_STATUSES)[number];
-export type TaskType = (typeof CANONICAL_TYPES)[number];
-export type TaskPriority = (typeof CANONICAL_PRIORITIES)[number];
-export type SwimlaneMode = 'project' | 'parent' | 'priority' | 'none';
+export type SwimlaneMode = 'project' | 'epic' | 'parent' | 'priority' | 'none';
 
 export interface ProjectRecord {
   path: string;
@@ -42,32 +27,41 @@ export interface TaskCard {
   id: string;
   title: string;
   status: TaskStatus;
-  priority: TaskPriority;
-  type: TaskType;
+  priority: string;
+  type: string;
+  epic: string | null;
   parent: string | null;
-  projects: string[];
+  project: string | null;
   labels: string[];
   assignee: string | null;
   reporter: string | null;
+  model: string | null;
+  dependsOn: string[];
+  blocks: string[];
+  related: string[];
+  commits: string[];
+  workspaces: unknown[];
   completionEvidence: unknown[];
+  archived: boolean;
 }
 
 export function normalizeStatus(value: unknown): TaskStatus | null {
   return CANONICAL_STATUSES.includes(value as TaskStatus) ? (value as TaskStatus) : null;
 }
 
-export function normalizeType(value: unknown): TaskType | null {
-  return CANONICAL_TYPES.includes(value as TaskType) ? (value as TaskType) : null;
-}
-
-export function normalizePriority(value: unknown): TaskPriority | null {
-  return CANONICAL_PRIORITIES.includes(value as TaskPriority) ? (value as TaskPriority) : null;
+export function normalizeType(value: unknown): string {
+  if (value === 'docs') return 'documentation';
+  if (value === 'implementation') return 'feature';
+  if (value === 'maintenance') return 'chore';
+  return typeof value === 'string' && value ? value : 'chore';
 }
 
 export function swimlaneKeys(task: TaskCard, mode: SwimlaneMode): string[] {
   switch (mode) {
     case 'project':
-      return task.projects.length ? task.projects : ['No project'];
+      return [task.project || 'No project'];
+    case 'epic':
+      return [task.epic || 'No epic'];
     case 'parent':
       return [task.parent || 'Top-level'];
     case 'priority':
@@ -85,22 +79,28 @@ export function matchesQuery(task: TaskCard, query: string): boolean {
     task.title,
     task.priority,
     task.type,
+    task.epic,
     task.parent,
-    ...task.projects,
+    task.project,
     task.assignee,
     task.reporter,
+    task.model,
     ...task.labels,
+    ...task.dependsOn,
+    ...task.blocks,
+    ...task.related,
   ]
     .filter((value): value is string => typeof value === 'string')
     .some((value) => value.toLocaleLowerCase().includes(needle));
 }
 
-export function canMoveToDone(task: TaskCard): boolean {
-  return task.completionEvidence.length > 0;
+export function canMoveToClosed(task: TaskCard): boolean {
+  if (task.commits.length > 0) return true;
+  return task.workspaces.length === 0 && task.completionEvidence.length > 0;
 }
 
 export function isTerminal(status: TaskStatus): boolean {
-  return status === 'done' || status === 'cancelled';
+  return status === 'Closed' || status === 'Cancelled';
 }
 
 export function appendAuditComment(content: string, timestamp: string, message: string): string {
@@ -116,4 +116,23 @@ export function appendAuditComment(content: string, timestamp: string, message: 
   const before = content.slice(0, insertionPoint).trimEnd();
   const after = content.slice(insertionPoint).trimStart();
   return after ? `${before}\n\n${block}\n${after}` : `${before}\n\n${block}`;
+}
+
+export function updateStatusContent(content: string, status: TaskStatus, timestamp: string, message: string): string {
+  const match = /^---\n([\s\S]*?)\n---(?=\n|$)/.exec(content);
+  if (!match) throw new Error('Task frontmatter is missing');
+  let frontmatter = match[1]!;
+  const setField = (field: string, value: string) => {
+    const line = new RegExp(`^${field}:[^\\n]*$`, 'm');
+    frontmatter = line.test(frontmatter)
+      ? frontmatter.replace(line, `${field}: ${JSON.stringify(value)}`)
+      : `${frontmatter}\n${field}: ${JSON.stringify(value)}`;
+  };
+  setField('status', status);
+  setField('updated', timestamp);
+  if (status === 'in_progress' && !/^start_date:\s*(?!null\s*$|["']?\s*$)/m.test(frontmatter)) {
+    setField('start_date', timestamp);
+  }
+  if (isTerminal(status)) setField('finish_date', timestamp);
+  return appendAuditComment(`---\n${frontmatter}\n---${content.slice(match[0].length)}`, timestamp, message);
 }

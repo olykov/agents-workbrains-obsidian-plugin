@@ -5,8 +5,6 @@ import { loadTasks } from './task-index';
 import { loadProjects } from './project-index';
 import {
   DEFAULT_SETTINGS,
-  PROJECTS_ROOT,
-  TASKS_ROOT,
   WorkbrainKanbanSettings,
   WorkbrainKanbanSettingTab,
 } from './settings';
@@ -22,7 +20,7 @@ export default class WorkbrainKanbanPlugin extends Plugin {
       (leaf: WorkspaceLeaf) => new WorkbrainKanbanView(leaf, this),
     );
 
-    this.addRibbonIcon('columns-3', 'Open Agents Workbrain Kanban', () => {
+    this.addRibbonIcon('columns-3', 'Open Workbrain Kanban', () => {
       void this.activateView();
     });
     this.addCommand({
@@ -44,11 +42,11 @@ export default class WorkbrainKanbanPlugin extends Plugin {
   }
 
   getTasks() {
-    return loadTasks(this.app, TASKS_ROOT);
+    return loadTasks(this.app, this.settings.tasksRoot);
   }
 
   getProjects() {
-    return loadProjects(this.app, PROJECTS_ROOT);
+    return loadProjects(this.app, this.settings.projectsRoot);
   }
 
   refreshViews(): void {
@@ -59,6 +57,8 @@ export default class WorkbrainKanbanPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    if (this.settings.tasksRoot === '02_tasks') this.settings.tasksRoot = '02_work';
+    if (this.settings.projectsRoot === '02_projects') this.settings.projectsRoot = '02_work';
   }
 
   async saveSettings(): Promise<void> {

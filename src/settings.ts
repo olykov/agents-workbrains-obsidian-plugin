@@ -4,19 +4,20 @@ import WorkbrainKanbanPlugin from './main';
 import { SwimlaneMode } from './domain';
 
 export interface WorkbrainKanbanSettings {
+  tasksRoot: string;
+  projectsRoot: string;
   defaultSwimlane: SwimlaneMode;
   showTerminalColumns: boolean;
-  showArchivedProjects: boolean;
+  showArchivedTasks: boolean;
   allowStatusChanges: boolean;
 }
 
-export const TASKS_ROOT = '02_tasks';
-export const PROJECTS_ROOT = '02_projects';
-
 export const DEFAULT_SETTINGS: WorkbrainKanbanSettings = {
+  tasksRoot: '02_work',
+  projectsRoot: '02_work',
   defaultSwimlane: 'project',
   showTerminalColumns: false,
-  showArchivedProjects: false,
+  showArchivedTasks: false,
   allowStatusChanges: true,
 };
 
@@ -29,10 +30,33 @@ export class WorkbrainKanbanSettingTab extends PluginSettingTab {
     this.containerEl.empty();
 
     new Setting(this.containerEl)
+      .setName('Tasks root')
+      .setDesc('Vault-relative folder containing canonical task files.')
+      .addText((text) =>
+        text.setValue(this.plugin.settings.tasksRoot).onChange(async (value) => {
+          const normalized = value.replace(/^\/+|\/+$/g, '') || '02_work';
+          this.plugin.settings.tasksRoot = normalized;
+          await this.plugin.saveSettings();
+          this.plugin.refreshViews();
+        }),
+      );
+
+    new Setting(this.containerEl)
+      .setName('Projects root')
+      .setDesc('Vault-relative folder containing project.md manifests.')
+      .addText((text) =>
+        text.setValue(this.plugin.settings.projectsRoot).onChange(async (value) => {
+          this.plugin.settings.projectsRoot = value.replace(/^\/+|\/+$/g, '') || '02_work';
+          await this.plugin.saveSettings();
+          this.plugin.refreshViews();
+        }),
+      );
+
+    new Setting(this.containerEl)
       .setName('Default swimlane')
       .addDropdown((dropdown) =>
         dropdown
-          .addOptions({ project: 'Project', parent: 'Parent', priority: 'Priority', none: 'None' })
+          .addOptions({ project: 'Project', epic: 'Epic', parent: 'Parent', priority: 'Priority', none: 'None' })
           .setValue(this.plugin.settings.defaultSwimlane)
           .onChange(async (value) => {
             this.plugin.settings.defaultSwimlane = value as SwimlaneMode;
@@ -43,7 +67,7 @@ export class WorkbrainKanbanSettingTab extends PluginSettingTab {
 
     new Setting(this.containerEl)
       .setName('Show terminal columns by default')
-      .setDesc('Show done and cancelled when the board opens.')
+      .setDesc('Show Closed and Cancelled when the board opens.')
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.showTerminalColumns).onChange(async (value) => {
           this.plugin.settings.showTerminalColumns = value;
@@ -53,11 +77,11 @@ export class WorkbrainKanbanSettingTab extends PluginSettingTab {
       );
 
     new Setting(this.containerEl)
-      .setName('Show archived projects by default')
-      .setDesc('Include archived project manifests in the project filter.')
+      .setName('Show archived tasks by default')
+      .setDesc('Show tasks from the archive folder.')
       .addToggle((toggle) =>
-        toggle.setValue(this.plugin.settings.showArchivedProjects).onChange(async (value) => {
-          this.plugin.settings.showArchivedProjects = value;
+        toggle.setValue(this.plugin.settings.showArchivedTasks).onChange(async (value) => {
+          this.plugin.settings.showArchivedTasks = value;
           await this.plugin.saveSettings();
           this.plugin.refreshViews();
         }),

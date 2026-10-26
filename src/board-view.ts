@@ -1,9 +1,8 @@
-import { ItemView, Notice, setIcon, TFile, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, setIcon, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
 
 import {
-  appendAuditComment,
   CANONICAL_STATUSES,
-  canMoveToDone,
+  canMoveToClosed,
   isTerminal,
   matchesQuery,
   swimlaneKeys,
@@ -13,8 +12,8 @@ import {
   visibleProjects,
 } from './domain';
 import WorkbrainKanbanPlugin from './main';
-import { TASKS_ROOT } from './settings';
 import { StatusReasonModal } from './status-reason-modal';
+import { applyStatusTransition } from './task-transition';
 
 export const WORKBRAIN_KANBAN_VIEW = 'agents-workbrain-kanban-view';
 
@@ -23,9 +22,9 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: 'Todo',
   in_progress: 'In progress',
   review: 'Review',
-  blocked: 'Blocked',
-  done: 'Done',
-  cancelled: 'Cancelled',
+  Blocked: 'Blocked',
+  Closed: 'Closed',
+  Cancelled: 'Cancelled',
 };
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -39,7 +38,7 @@ export class WorkbrainKanbanView extends ItemView {
   private query = '';
   private swimlane: SwimlaneMode;
   private showTerminal: boolean;
-  private showArchivedProjects: boolean;
+  private showArchived: boolean;
   private selectedProject = '';
   private readonly collapsed = new Set<string>();
 
@@ -47,7 +46,7 @@ export class WorkbrainKanbanView extends ItemView {
     super(leaf);
     this.swimlane = plugin.settings.defaultSwimlane;
     this.showTerminal = plugin.settings.showTerminalColumns;
-    this.showArchivedProjects = plugin.settings.showArchivedProjects;
+    this.showArchived = plugin.settings.showArchivedTasks;
   }
 
   getViewType(): string {
@@ -78,13 +77,14 @@ export class WorkbrainKanbanView extends ItemView {
 
     const tasks = this.plugin.getTasks();
     const projects = this.plugin.getProjects();
-    const selectableProjects = visibleProjects(projects, this.showArchivedProjects);
+    const selectableProjects = visibleProjects(projects, this.showArchived);
     if (this.selectedProject && !selectableProjects.some((project) => project.id === this.selectedProject)) {
       this.selectedProject = '';
     }
     const visibleTasks = tasks.filter(
       (task) =>
-        (!this.selectedProject || task.projects.includes(this.selectedProject)) &&
+        (!this.selectedProject || task.project === this.selectedProject) &&
+        (this.showArchived || !task.archived) &&
         (this.showTerminal || !isTerminal(task.status)) &&
         matchesQuery(task, this.query),
     );
@@ -156,6 +156,7 @@ export class WorkbrainKanbanView extends ItemView {
     });
     const modes: Array<[SwimlaneMode, string]> = [
       ['project', 'Project swimlanes'],
+      ['epic', 'Epic swimlanes'],
       ['parent', 'Parent swimlanes'],
       ['priority', 'Priority swimlanes'],
       ['none', 'No swimlanes'],
@@ -180,12 +181,12 @@ export class WorkbrainKanbanView extends ItemView {
     });
 
     const archivedToggle = controls.createEl('button', {
-      text: this.showArchivedProjects ? 'Hide archived projects' : 'Show archived projects',
+      text: this.showArchived ? 'Hide archived' : 'Show archived',
       cls: 'agents-workbrain-kanban-archived-toggle',
       attr: { type: 'button' },
     });
     archivedToggle.addEventListener('click', () => {
-      this.showArchivedProjects = !this.showArchivedProjects;
+      this.showArchived = !this.showArchived;
       this.render();
     });
 
@@ -201,7 +202,7 @@ export class WorkbrainKanbanView extends ItemView {
     const empty = root.createDiv({ cls: 'agents-workbrain-kanban-empty' });
     empty.createEl('h3', { text: 'No canonical tasks found' });
     empty.createEl('p', {
-      text: `Expected canonical task files at ${TASKS_ROOT}/<slug>/task.md.`,
+      text: `Expected task files below ${this.plugin.settings.tasksRoot}/ with id, title, and status frontmatter.`,
     });
   }
 
@@ -222,7 +223,7 @@ export class WorkbrainKanbanView extends ItemView {
     if (this.collapsed.has(name)) return;
 
     const statuses = CANONICAL_STATUSES.filter(
-      (status) => this.showTerminal || (status !== 'done' && status !== 'cancelled'),
+      (status) => this.showTerminal || !isTerminal(status),
     );
     const columns = lane.createDiv({ cls: 'agents-workbrain-kanban-columns' });
     columns.style.setProperty('--agents-workbrain-kanban-columns', String(statuses.length));
@@ -239,7 +240,7 @@ export class WorkbrainKanbanView extends ItemView {
   }
 
   private renderColumn(columns: HTMLElement, status: TaskStatus, tasks: TaskCard[]): void {
-    const column = columns.createDiv({ cls: `agents-workbrain-kanban-column is-${status}` });
+    const column = columns.createDiv({ cls: `agents-workbrain-kanban-column is-${status.toLowerCase()}` });
     column.dataset.status = status;
     const header = column.createDiv({ cls: 'agents-workbrain-kanban-column-header' });
     header.createEl('span', { text: STATUS_LABELS[status] });
@@ -271,7 +272,7 @@ export class WorkbrainKanbanView extends ItemView {
       cls: `agents-workbrain-kanban-card priority-${task.priority}`,
       attr: { tabindex: '0', 'aria-label': `${task.id}: ${task.title}` },
     });
-    card.draggable = this.plugin.settings.allowStatusChanges && !isTerminal(task.status);
+    card.draggable = this.plugin.settings.allowStatusChanges && !task.archived && !isTerminal(task.status);
     card.addEventListener('dragstart', (event) => {
       event.dataTransfer?.setData('text/workbrain-task-path', task.path);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
@@ -292,9 +293,9 @@ export class WorkbrainKanbanView extends ItemView {
     const footer = card.createDiv({ cls: 'agents-workbrain-kanban-card-footer' });
     footer.createEl('span', { text: task.type });
     if (task.parent) footer.createEl('span', { text: `↳ ${task.parent}` });
-    for (const project of task.projects) footer.createEl('span', { text: project });
+    if (task.project) footer.createEl('span', { text: task.project });
 
-    if (this.plugin.settings.allowStatusChanges && !isTerminal(task.status)) {
+    if (this.plugin.settings.allowStatusChanges && !task.archived && !isTerminal(task.status)) {
       const select = footer.createEl('select', {
         attr: { 'aria-label': `Change status for ${task.id}` },
         cls: 'dropdown agents-workbrain-kanban-status-select',
@@ -317,13 +318,17 @@ export class WorkbrainKanbanView extends ItemView {
       new Notice('Terminal tasks must be reopened through the canonical task workflow.');
       return;
     }
-    if (next === 'done' && !canMoveToDone(task)) {
-      new Notice('Done requires at least one completion_evidence entry.');
+    if (task.archived) {
+      new Notice('Restore this project or task before changing its status.');
+      return;
+    }
+    if (next === 'Closed' && !canMoveToClosed(task)) {
+      new Notice('Closed requires commits or vault-native completion evidence.');
       return;
     }
 
     let reason: string | null = null;
-    if (next === 'blocked' || next === 'cancelled') {
+    if (next === 'Blocked' || next === 'Cancelled') {
       const modal = new StatusReasonModal(this.app, next);
       modal.open();
       reason = await modal.promise;
@@ -336,30 +341,42 @@ export class WorkbrainKanbanView extends ItemView {
       return;
     }
 
+    const folder = file.parent;
+    if (!(folder instanceof TFolder)) {
+      new Notice(`Task folder not found: ${task.path}`);
+      return;
+    }
+    const terminal = isTerminal(next);
+    const archiveParent = `archive/${task.project || '_no_project'}`;
+    const destination = `${archiveParent}/${folder.name}`;
+    if (terminal && this.app.vault.getAbstractFileByPath(destination)) {
+      new Notice(`Archive destination already exists: ${destination}`);
+      return;
+    }
+
     const now = new Date().toISOString();
+    const message = reason
+      ? `Status changed from ${task.status} to ${next}. Reason: ${reason}`
+      : `Status changed from ${task.status} to ${next}.`;
     try {
-      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-        frontmatter.status = next;
-        frontmatter.updated = now;
-        if (next === 'in_progress' && !frontmatter.start_date) frontmatter.start_date = now;
-        if (next === 'done') frontmatter.finish_date = now;
+      if (terminal && !this.app.vault.getAbstractFileByPath(archiveParent)) {
+        await this.app.vault.createFolder(archiveParent);
+      }
+      await applyStatusTransition(next, now, message, {
+        read: () => this.app.vault.read(file),
+        write: (content) => this.app.vault.process(file, () => content).then(() => undefined),
+        moveToArchive: () => this.app.fileManager.renameFile(folder, destination),
+        restorePath: async () => {
+          if (folder.path === destination) await this.app.fileManager.renameFile(folder, task.path.slice(0, task.path.lastIndexOf('/')));
+        },
       });
-      await this.appendAuditComment(
-        file,
-        now,
-        reason
-          ? `Status changed from ${task.status} to ${next}. Reason: ${reason}`
-          : `Status changed from ${task.status} to ${next}.`,
-      );
       new Notice(`${task.id} → ${STATUS_LABELS[next]}`);
       this.plugin.refreshViews();
     } catch (error) {
-      console.error('Agents Workbrain Kanban status update failed', error);
-      new Notice(`Could not update ${task.id}. Check the developer console.`);
+      console.error('Workbrain Kanban status update failed', error);
+      new Notice(error instanceof Error && error.message.includes('rollback both failed')
+        ? `Could not restore ${task.id}; inspect the task folder before retrying.`
+        : `Could not update ${task.id}; original task content was restored.`);
     }
-  }
-
-  private async appendAuditComment(file: TFile, timestamp: string, message: string): Promise<void> {
-    await this.app.vault.process(file, (content) => appendAuditComment(content, timestamp, message));
   }
 }
